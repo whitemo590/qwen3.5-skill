@@ -51,6 +51,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--dcp-path", default="/home/data/qwen3_5_0.8B_dcp")
     parser.add_argument("--generated-dir", default=str(default_generated))
     parser.add_argument("--mindspeed-root", default=str(project_root / "third_party" / "MindSpeed-MM"))
+    parser.add_argument("--benchmark-iters", type=int, default=100)
     return parser.parse_args(argv)
 
 
@@ -131,32 +132,77 @@ def main(argv: list[str] | None = None) -> int:
         print("[SUMMARY] config generation failed")
         return generate_code
 
-    print("[STEP 4] Weight conversion command preview")
+    print("[STEP 4] Integration contract validation")
+    integration_report = generated_dir / "integration_report.json"
+    integration_code = run_command(
+        [
+            sys.executable, str(project_root / "validate_integration.py"),
+            "--config", str(generated_config), "--mindspeed-root", args.mindspeed_root,
+            "--output-json", str(integration_report),
+        ]
+    )
+    if integration_code != 0:
+        print("[SUMMARY] integration contract validation failed")
+        return integration_code
+
+    print("[STEP 5] Baseline and optimized config generation")
+    experiment_dir = generated_dir / "experiments"
+    experiment_code = run_command(
+        [
+            sys.executable, str(project_root / "generate_experiment_configs.py"),
+            "--config", str(generated_config), "--output-dir", str(experiment_dir),
+            "--train-iters", str(args.benchmark_iters),
+        ]
+    )
+    if experiment_code != 0:
+        print("[SUMMARY] experiment config generation failed")
+        return experiment_code
+
+    print("[STEP 6] Runtime dependency check")
+    runtime_code = run_command(
+        [
+            sys.executable, str(project_root / "runtime_smoke_qwen3_5.py"),
+            "--mindspeed-root", args.mindspeed_root, "--check-only",
+        ]
+    )
+    if runtime_code != 0:
+        print("[SUMMARY] runtime smoke precheck failed")
+        return runtime_code
+
+    print("[STEP 7] Weight conversion command preview")
     print(
         f"bash {role_artifacts / 'convert_qwen3_5_0.8B_weights.sh'} "
         f"hf-to-dcp {args.model_path} {args.dcp_path}"
     )
 
-    print("[STEP 5] Training command preview")
+    print("[STEP 8] Training command preview")
     print(f"MINDSPEED_MM_ROOT={args.mindspeed_root} \\")
     print(f"  bash {role_artifacts / 'finetune_qwen3_5_0.8B.sh'} {generated_config}")
 
-    print("[STEP 6] Inference command preview")
+    print("[STEP 9] Inference command preview")
     print(
         f"python {role_artifacts / 'inference_qwen3_5.py'} "
         f"--model-path <exported_hf_checkpoint> --image <image.jpg> --device npu"
     )
 
-    print("[STEP 7] Precision alignment command preview")
+    print("[STEP 10] Precision alignment command preview")
     print(
         f"python {role_artifacts / 'precision_align_qwen3_5.py'} "
         f"--model-path {args.model_path} --mindspeed-root {args.mindspeed_root} "
         f"--data {args.data_file} --data-dir {args.data_dir} --device npu"
     )
 
+    print("[STEP 11] Performance report command preview")
+    print(
+        f"python {project_root / 'analyze_training_log.py'} --log <train.log> "
+        f"--output-json <report.json> --output-markdown <report.md>"
+    )
+
     print("[SUMMARY] mock skill flow completed")
     print(f"[INFO] validation report: {report_json}")
     print(f"[INFO] generated config: {generated_config}")
+    print(f"[INFO] integration report: {integration_report}")
+    print(f"[INFO] experiment configs: {experiment_dir}")
     return 0
 
 

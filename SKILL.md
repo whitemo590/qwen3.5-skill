@@ -1,6 +1,6 @@
 ---
 name: qwen35-fsdp2-migration
-description: Prepare and execute Qwen3.5-0.8B migration to Huawei Ascend NPU with MindSpeed-MM FSDP2. Use for validating MLLM data, pinning and checking MindSpeed-MM 26.0.0, generating configs, converting HF/DCP weights, launching fine-tuning, running image-text inference, checking numerical alignment, or previewing these steps without NPU access.
+description: Prepare, validate, benchmark, and execute Qwen3.5-0.8B migration to Huawei Ascend NPU with MindSpeed-MM FSDP2. Use for MLLM data checks, MindSpeed-MM contract validation, FSDP module-plan checks, tiny-model smoke tests, baseline/optimized config generation, HF/DCP conversion, fine-tuning, inference, numerical alignment, training-log analysis, or performance reporting.
 ---
 
 # Qwen3.5 Ascend FSDP2 Migration Skill
@@ -31,17 +31,29 @@ inputs: model_path, dcp_path, dataset_dir, dataset_json, output_dir
   +-- 3. generate_config.py
   |      Generate a runnable FSDP2 YAML from A's template and user paths.
   |
-  +-- 4. role-a-artifacts/convert_qwen3_5_0.8B_weights.sh
+  +-- 4. validate_integration.py
+  |      Check model registration, forward fields, .loss contract, and FSDP plans.
+  |
+  +-- 5. generate_experiment_configs.py
+  |      Generate controlled baseline and optimized benchmark configs.
+  |
+  +-- 6. runtime_smoke_qwen3_5.py
+  |      Build a tiny random model when the target runtime is installed.
+  |
+  +-- 7. role-a-artifacts/convert_qwen3_5_0.8B_weights.sh
   |      Convert HF weights to DCP with the 0.8B tied-weight mapping.
   |
-  +-- 5. role-a-artifacts/finetune_qwen3_5_0.8B.sh
+  +-- 8. role-a-artifacts/finetune_qwen3_5_0.8B.sh
   |      Run torchrun with mindspeed_mm/fsdp/train/trainer.py.
   |
-  +-- 6. role-a-artifacts/inference_qwen3_5.py
+  +-- 9. role-a-artifacts/inference_qwen3_5.py
   |      Validate generated text and inference throughput.
   |
-  +-- 7. role-a-artifacts/precision_align_qwen3_5.py
-         Compare Hugging Face and MindSpeed-MM logits.
+  +-- 10. role-a-artifacts/precision_align_qwen3_5.py
+  |      Compare Hugging Face and MindSpeed-MM logits.
+  |
+  +-- 11. analyze_training_log.py
+         Produce JSON/Markdown performance evidence and baseline comparisons.
 ```
 
 ## Model Integration
@@ -116,6 +128,14 @@ python run_skill.py \
 
 The mock flow performs source/plugin preflight, validates dataset references, generates YAML, and prints concrete weight conversion, training, inference, and alignment commands.
 
+Run the target-environment tiny-model test after installing the pinned dependencies:
+
+```bash
+python runtime_smoke_qwen3_5.py --mindspeed-root third_party/MindSpeed-MM
+```
+
+Read `references/P1_VALIDATION.md` before comparing baseline and optimized runs.
+
 Validate data directly:
 
 ```bash
@@ -171,5 +191,6 @@ Change `MASTER_PORT` in the launch script or stop the stale torchrun process.
 ## References
 
 - `references/MINDSPEED_MM_VERSION.md`
+- `references/P1_VALIDATION.md`
 - `role-a-artifacts/qwen3_5_0.8B_config.yaml`
 - Official Qwen3.5 guide: `https://github.com/Ascend/MindSpeed-MM/tree/26.0.0/examples/qwen3_5`

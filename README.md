@@ -12,6 +12,10 @@ qwen3.5-skill/
 ├── README.md             # 人类交接与使用说明
 ├── validate_data.py      # COCO/MLLM 数据校验脚本
 ├── generate_config.py    # 基于 A 的 YAML 模板生成训练配置
+├── validate_integration.py
+├── runtime_smoke_qwen3_5.py
+├── generate_experiment_configs.py
+├── analyze_training_log.py
 ├── run_skill.py          # 无 NPU mock demo 入口
 ├── references/           # 固定的上游版本信息
 ├── role-a-artifacts/
@@ -48,14 +52,49 @@ python run_skill.py \
 1. 检查官方 MindSpeed-MM 插件、转换器和迁移资产
 2. 调用 `validate_data.py` 校验数据
 3. 调用 `generate_config.py` 生成 YAML
-4. 打印权重转换、训练、推理和精度对齐命令
-5. 输出预检报告、数据报告和生成配置
+4. 校验模型接口、`.loss` 合约和 FSDP/Recompute 模块模式
+5. 生成等效 batch 的 baseline/optimized 配置
+6. 检查目标运行依赖
+7. 打印权重转换、训练、推理、对齐和性能报告命令
 
 预期结果：
 
 ```text
 [SUMMARY] 19/19 checks passed, 0 failed
 [SUMMARY] mock skill flow completed
+```
+
+## P1 离线测试
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+目标 NPU 环境安装完成后运行小随机模型构造：
+
+```bash
+python runtime_smoke_qwen3_5.py \
+  --mindspeed-root third_party/MindSpeed-MM
+```
+
+生成可公平比较的性能配置：
+
+```bash
+python generate_experiment_configs.py \
+  --config generated/qwen3_5_0.8B_config.generated.yaml \
+  --output-dir generated/experiments \
+  --effective-batch 4 \
+  --train-iters 100
+```
+
+解析训练日志：
+
+```bash
+python analyze_training_log.py \
+  --log logs/train.log \
+  --warmup-steps 10 \
+  --output-json generated/performance.json \
+  --output-markdown generated/performance.md
 ```
 
 ## 单独校验数据
@@ -146,6 +185,10 @@ NPU 到位后接入 torchrun + mindspeed_mm/fsdp/train/trainer.py
 - Python 语法检查通过
 - `run_skill.py` 完整跑通
 - 数据校验 `19/19 checks passed`
+- 模型/FSDP2 集成校验 `36/36 non-failing`
+- P1 离线单元测试 `3/3 passed`
+- 训练日志可输出 step time、P95、samples/s、loss、grad norm 和显存统计
+- baseline/optimized 配置保持相同 effective batch
 - 生成的 YAML 可被 `pyyaml` 正常解析
 - `SKILL.md` 已通过 Codex skill `quick_validate.py`
 
@@ -153,7 +196,9 @@ NPU 到位后接入 torchrun + mindspeed_mm/fsdp/train/trainer.py
 
 ```text
 generated/validate_report.json
+generated/integration_report.json
 generated/qwen3_5_0.8B_config.generated.yaml
+generated/experiments/
 ```
 
 ## 固定 MindSpeed-MM 版本
