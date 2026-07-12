@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import platform
 import subprocess
 import sys
@@ -11,6 +12,8 @@ from pathlib import Path
 
 
 def configure_stdio() -> None:
+    if os.name == "nt":
+        return
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)
@@ -18,6 +21,8 @@ def configure_stdio() -> None:
 
 def find_project_root(start: Path) -> Path:
     for current in [start, *start.parents]:
+        if (current / "role-a-artifacts" / "qwen3_5_0.8B_config.yaml").is_file():
+            return current
         if (current / "dataset" / "dataset" / "annotations_slim.json").is_file():
             return current
     return start
@@ -25,7 +30,7 @@ def find_project_root(start: Path) -> Path:
 
 def run_command(command: list[str]) -> int:
     print("[CMD] " + " ".join(str(part) for part in command))
-    completed = subprocess.run(command, text=True)
+    completed = subprocess.run(command, text=True, encoding="utf-8", errors="replace")
     return completed.returncode
 
 
@@ -45,6 +50,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--output-dir", default=str(default_generated / "qwen3_5_0.8B_finetune"))
     parser.add_argument("--dcp-path", default="/home/data/qwen3_5_0.8B_dcp")
     parser.add_argument("--generated-dir", default=str(default_generated))
+    parser.add_argument("--mindspeed-root", default=str(project_root / "third_party" / "MindSpeed-MM"))
     return parser.parse_args(argv)
 
 
@@ -55,10 +61,29 @@ def main(argv: list[str] | None = None) -> int:
     generated_dir = Path(args.generated_dir)
     generated_dir.mkdir(parents=True, exist_ok=True)
 
-    print("[STEP 1] Environment check (mock)")
+    project_root = find_project_root(script_dir)
+    role_artifacts = project_root / "role-a-artifacts"
+
+    print("[STEP 1] Environment and migration asset check (mock)")
     print(f"[INFO] Python: {platform.python_version()}")
     print(f"[INFO] OS: {platform.platform()}")
     print("[INFO] torch and mindspeed_mm are intentionally not imported")
+
+    preflight_code = run_command(
+        [
+            sys.executable,
+            str(role_artifacts / "preflight_qwen3_5.py"),
+            "--project-root",
+            str(project_root),
+            "--mindspeed-root",
+            args.mindspeed_root,
+            "--output-json",
+            str(generated_dir / "preflight_report.json"),
+        ]
+    )
+    if preflight_code != 0:
+        print("[SUMMARY] migration asset preflight failed")
+        return preflight_code
 
     print("[STEP 2] Data validation")
     report_json = generated_dir / "validate_report.json"
@@ -106,14 +131,28 @@ def main(argv: list[str] | None = None) -> int:
         print("[SUMMARY] config generation failed")
         return generate_code
 
-    print("[STEP 4] Training command preview")
-    print("source /usr/local/Ascend/cann/set_env.sh")
-    print("torchrun $DISTRIBUTED_ARGS mindspeed_mm/fsdp/train/trainer.py \\")
-    print(f"  {generated_config}")
+    print("[STEP 4] Weight conversion command preview")
+    print(
+        f"bash {role_artifacts / 'convert_qwen3_5_0.8B_weights.sh'} "
+        f"hf-to-dcp {args.model_path} {args.dcp_path}"
+    )
 
-    print("[STEP 5] Inference command preview")
-    print(f"# Load checkpoint from: {args.output_dir}")
-    print("# Run the Qwen3.5 inference script after the NPU environment is available")
+    print("[STEP 5] Training command preview")
+    print(f"MINDSPEED_MM_ROOT={args.mindspeed_root} \\")
+    print(f"  bash {role_artifacts / 'finetune_qwen3_5_0.8B.sh'} {generated_config}")
+
+    print("[STEP 6] Inference command preview")
+    print(
+        f"python {role_artifacts / 'inference_qwen3_5.py'} "
+        f"--model-path <exported_hf_checkpoint> --image <image.jpg> --device npu"
+    )
+
+    print("[STEP 7] Precision alignment command preview")
+    print(
+        f"python {role_artifacts / 'precision_align_qwen3_5.py'} "
+        f"--model-path {args.model_path} --mindspeed-root {args.mindspeed_root} "
+        f"--data {args.data_file} --data-dir {args.data_dir} --device npu"
+    )
 
     print("[SUMMARY] mock skill flow completed")
     print(f"[INFO] validation report: {report_json}")

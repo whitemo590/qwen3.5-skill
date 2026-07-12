@@ -2,7 +2,7 @@
 
 Qwen3.5-0.8B 昇腾 NPU FSDP2 自动迁移与优化 Skill 的本地准备产物。
 
-本目录面向“无 NPU 服务器”的初赛阶段，目标是在纯文件级环境下完成数据校验、配置生成和 mock 流程演示。当前脚本不会 import `torch`、`torch_npu`、`mindspeed_mm`，也不会启动真实训练。
+本仓库同时覆盖无 NPU 的离线预检，以及 NPU 环境中的权重转换、训练、推理和精度对齐入口。Mock 流程不会导入 `torch`、`torch_npu` 或 `mindspeed_mm`。
 
 ## 目录结构
 
@@ -13,6 +13,13 @@ qwen3.5-skill/
 ├── validate_data.py      # COCO/MLLM 数据校验脚本
 ├── generate_config.py    # 基于 A 的 YAML 模板生成训练配置
 ├── run_skill.py          # 无 NPU mock demo 入口
+├── references/           # 固定的上游版本信息
+├── role-a-artifacts/
+│   ├── preflight_qwen3_5.py
+│   ├── convert_qwen3_5_0.8B_weights.sh
+│   ├── finetune_qwen3_5_0.8B.sh
+│   ├── inference_qwen3_5.py
+│   └── precision_align_qwen3_5.py
 └── generated/            # 运行后生成的报告和配置
 ```
 
@@ -27,19 +34,22 @@ dataset/dataset/COCO2017/train2017/
 
 ## 快速运行
 
-在仓库根目录执行：
+先按 `references/MINDSPEED_MM_VERSION.md` 克隆官方源码，并准备数据集，然后在仓库根目录执行：
 
 ```bash
-python run_skill.py
+python run_skill.py \
+  --mindspeed-root third_party/MindSpeed-MM \
+  --data-dir /path/to/dataset \
+  --data-file /path/to/dataset/annotations_slim.json
 ```
 
 该命令会依次完成：
 
-1. mock 环境检查
+1. 检查官方 MindSpeed-MM 插件、转换器和迁移资产
 2. 调用 `validate_data.py` 校验数据
 3. 调用 `generate_config.py` 生成 YAML
-4. 打印未来 NPU 服务器上的训练命令预览
-5. 输出报告和生成配置路径
+4. 打印权重转换、训练、推理和精度对齐命令
+5. 输出预检报告、数据报告和生成配置
 
 预期结果：
 
@@ -146,17 +156,36 @@ generated/validate_report.json
 generated/qwen3_5_0.8B_config.generated.yaml
 ```
 
+## 固定 MindSpeed-MM 版本
+
+```bash
+git clone --depth 1 --branch 26.0.0 \
+  https://github.com/Ascend/MindSpeed-MM.git \
+  third_party/MindSpeed-MM
+```
+
+固定 commit 为 `08d37c0a08cefd869ac3c99b49d9fc14ee4e612a`，详见 `references/MINDSPEED_MM_VERSION.md`。
+
 ## NPU 阶段衔接
 
 当昇腾 NPU 服务器可用后，需要：
 
 1. 按 `install_guide.md` 安装 CANN、PyTorch、torch_npu、MindSpeed、MindSpeed-MM。
-2. 准备 Qwen3.5-0.8B HF 权重和 DCP 权重。
-3. 把生成配置里的路径替换为服务器真实路径。
-4. 使用 A 的启动脚本或等价命令启动训练：
+2. 下载 Qwen3.5-0.8B HF 权重。
+3. 转换权重：
 
 ```bash
-source /usr/local/Ascend/cann/set_env.sh
-torchrun $DISTRIBUTED_ARGS mindspeed_mm/fsdp/train/trainer.py \
-  qwen3_5_0.8B_config.generated.yaml
+bash role-a-artifacts/convert_qwen3_5_0.8B_weights.sh \
+  hf-to-dcp /path/to/hf_model /path/to/dcp_model
 ```
+
+4. 生成服务器配置并启动训练：
+
+```bash
+MINDSPEED_MM_ROOT=/path/to/MindSpeed-MM \
+bash role-a-artifacts/finetune_qwen3_5_0.8B.sh \
+  generated/qwen3_5_0.8B_config.generated.yaml
+```
+
+5. 将 DCP 导出为 HF 后运行 `inference_qwen3_5.py`。
+6. 使用 `precision_align_qwen3_5.py` 比较 HF 与 MindSpeed-MM logits。

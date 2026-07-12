@@ -16,6 +16,8 @@ except ImportError:  # pragma: no cover - exercised only on minimal systems
 
 
 def configure_stdio() -> None:
+    if os.name == "nt":
+        return
     for stream in (sys.stdout, sys.stderr):
         if hasattr(stream, "reconfigure"):
             stream.reconfigure(encoding="utf-8", errors="replace", line_buffering=True)

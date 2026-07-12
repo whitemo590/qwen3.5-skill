@@ -1,18 +1,15 @@
 ---
 name: qwen35-fsdp2-migration
-description: Automate file-level preparation for Qwen3.5-0.8B migration to Huawei Ascend NPU with MindSpeed-MM FSDP2. Use for validating MLLM JSON data, generating FSDP2 YAML configs, previewing no-NPU mock training flows, and guiding the later NPU fine-tuning, inference, and performance-report workflow.
+description: Prepare and execute Qwen3.5-0.8B migration to Huawei Ascend NPU with MindSpeed-MM FSDP2. Use for validating MLLM data, pinning and checking MindSpeed-MM 26.0.0, generating configs, converting HF/DCP weights, launching fine-tuning, running image-text inference, checking numerical alignment, or previewing these steps without NPU access.
 ---
 
 # Qwen3.5 Ascend FSDP2 Migration Skill
 
-Use this skill to prepare and validate the Qwen3.5-0.8B MindSpeed-MM FSDP2 fine-tuning flow before an Ascend NPU server is available. Keep all preflight work file-level only: do not import `torch`, `torch_npu`, or `mindspeed_mm` in the local mock flow.
+Use this skill for the Qwen3.5-0.8B MindSpeed-MM FSDP2 lifecycle. Run the mock path before an Ascend server is available; run conversion, training, inference, and alignment only in the matching NPU environment.
 
 ## Prerequisites
 
-For real NPU training, follow the project root guides:
-
-- `../../../../install_guide.md` for CANN, PyTorch, torch_npu, MindSpeed, and MindSpeed-MM setup.
-- `../../../../fsdp2_developer_migration_guide.md` for the plugin-style FSDP2 backend.
+Before running the workflow, read `references/MINDSPEED_MM_VERSION.md` and clone the pinned MindSpeed-MM source. Follow the official MindSpeed-MM 26.0.0 Qwen3.5 installation guide for CANN, PyTorch, torch_npu, and extensions.
 
 Expected real training stack:
 
@@ -25,17 +22,26 @@ Expected real training stack:
 ```text
 inputs: model_path, dcp_path, dataset_dir, dataset_json, output_dir
   |
-  +-- 1. validate_data.py
+  +-- 1. role-a-artifacts/preflight_qwen3_5.py
+  |      Check the pinned MindSpeed-MM plugin, converter, config, and launch assets.
+  |
+  +-- 2. validate_data.py
   |      Validate JSON, field mapping, conversation order, <image> tokens, and image files.
   |
-  +-- 2. generate_config.py
+  +-- 3. generate_config.py
   |      Generate a runnable FSDP2 YAML from A's template and user paths.
   |
-  +-- 3. run_skill.py
-  |      Execute the no-NPU mock flow and print training/inference command previews.
+  +-- 4. role-a-artifacts/convert_qwen3_5_0.8B_weights.sh
+  |      Convert HF weights to DCP with the 0.8B tied-weight mapping.
   |
-  +-- 4. real NPU phase
-         Run torchrun with mindspeed_mm/fsdp/train/trainer.py and collect logs.
+  +-- 5. role-a-artifacts/finetune_qwen3_5_0.8B.sh
+  |      Run torchrun with mindspeed_mm/fsdp/train/trainer.py.
+  |
+  +-- 6. role-a-artifacts/inference_qwen3_5.py
+  |      Validate generated text and inference throughput.
+  |
+  +-- 7. role-a-artifacts/precision_align_qwen3_5.py
+         Compare Hugging Face and MindSpeed-MM logits.
 ```
 
 ## Model Integration
@@ -47,6 +53,14 @@ Qwen3.5 uses MindSpeed-MM's plugin-style FSDP2 path:
 - Model plugin: `mindspeed_mm/fsdp/models/qwen3_5`
 - Data plugin: `mindspeed_mm/fsdp/data/datasets/huggingface`
 - Weight format for training load: DCP
+
+Use the pinned official implementation instead of copying an unmodified Hugging Face model file:
+
+```text
+third_party/MindSpeed-MM
+branch: 26.0.0
+commit: 08d37c0a08cefd869ac3c99b49d9fc14ee4e612a
+```
 
 The YAML template to adapt is:
 
@@ -91,11 +105,16 @@ Field alignment with A's YAML:
 
 ## Quick Start
 
-Run the full no-NPU mock flow from this directory:
+Run the no-NPU mock flow after cloning MindSpeed-MM and preparing an MLLM dataset:
 
 ```bash
-python run_skill.py
+python run_skill.py \
+  --mindspeed-root third_party/MindSpeed-MM \
+  --data-dir /path/to/dataset \
+  --data-file /path/to/dataset/annotations_slim.json
 ```
+
+The mock flow performs source/plugin preflight, validates dataset references, generates YAML, and prints concrete weight conversion, training, inference, and alignment commands.
 
 Validate data directly:
 
@@ -149,17 +168,8 @@ Set `training.micro_batch_size` to `1`, increase `gradient_accumulation_steps`, 
 **Torchrun reports a bind port conflict.**  
 Change `MASTER_PORT` in the launch script or stop the stale torchrun process.
 
-## Related Skills
-
-- `../mindspeed-mm-env-setup/SKILL.md`
-- `../mindspeed-mm-vlm/SKILL.md`
-- `../mindspeed-mm-pipeline/SKILL.md`
-- `../mindspeed-mm-weight-prep/SKILL.md`
-
 ## References
 
-- `../../../../数据集初步说明.md`
-- `../../../../fsdp2_developer_migration_guide.md`
-- `../../../../MIGRATION_GUIDE_MINDSPEED_MM_FSDP2.md`
+- `references/MINDSPEED_MM_VERSION.md`
 - `role-a-artifacts/qwen3_5_0.8B_config.yaml`
-- `../mindspeed-mm-vlm/references/data-format.md`
+- Official Qwen3.5 guide: `https://github.com/Ascend/MindSpeed-MM/tree/26.0.0/examples/qwen3_5`
