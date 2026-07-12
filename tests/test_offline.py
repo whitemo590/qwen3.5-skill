@@ -25,7 +25,7 @@ class OfflineWorkflowTests(unittest.TestCase):
             output_json = Path(temp) / "report.json"
             output_md = Path(temp) / "report.md"
             result = self.run_script(
-                "analyze_training_log.py", "--log", str(ROOT / "tests/fixtures/sample_train.log"),
+                "analyze_training_log.py", "--log", str(ROOT / "tests/fixtures/sample_train.txt"),
                 "--warmup-steps", "1", "--output-json", str(output_json),
                 "--output-markdown", str(output_md),
             )
